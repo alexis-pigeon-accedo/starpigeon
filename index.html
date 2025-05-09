@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-B">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Star Fox Inspired Screensaver</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- SCENE SETUP ---
+        let scene, camera, renderer;
+        let arwing, ground, sky;
+        const lasers = [];
+        let explosion = null;
+        let obstacles = []; // For buildings and arches
+        const clock = new THREE.Clock();
+        let animationTime = 0;
+        const animationDuration = 60; // 60 seconds
+
+        // Arwing properties
+        const arwingSpeed = 15;
+        let barrelRollActive = false;
+        let barrelRollProgress = 0;
+        const barrelRollDuration = 1; // 1 second for a barrel roll
+
+        // --- INITIALIZE ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x000000, 100, 300); // Add fog for depth and to hide disappearing objects
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10); // Initial chase camera position relative to origin
+            camera.lookAt(0, 2, 0); // Look slightly downwards
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xaaaaaa); // Soft ambient light
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            directionalLight.position.set(5, 10, 7);
+            scene.add(directionalLight);
+
+            // Create game elements
+            createArwing();
+            createGround();
+            createSky();
+            resetSceneState(); // Initialize obstacles and other dynamic elements
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start animation loop
+            animate();
+        }
+
+        // --- OBJECT CREATION ---
+        function createArwing() {
+            const arwingGroup = new THREE.Group();
+
+            // Main Body (trapezoidal prism)
+            const bodyShape = new THREE.Shape();
+            bodyShape.moveTo(-1, -0.5);
+            bodyShape.lineTo(1, -0.5);
+            bodyShape.lineTo(0.5, 0.5);
+            bodyShape.lineTo(-0.5, 0.5);
+            bodyShape.closePath();
+            const extrudeSettings = { depth: 2, bevelEnabled: false };
+            const bodyGeometry = new THREE.ExtrudeGeometry(bodyShape, extrudeSettings);
+            const bodyMaterial = new THREE.MeshLambertMaterial({ color: 0xaaaaaa, flatShading: true });
+            const mainBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            mainBody.rotation.x = Math.PI / 2; // Orient correctly
+            mainBody.position.z = -1; // Center it
+            arwingGroup.add(mainBody);
+
+            // Wings (triangular prisms or flat shapes)
+            const wingShape = new THREE.Shape();
+            wingShape.moveTo(0, 0);
+            wingShape.lineTo(3, -0.5); // Outer tip
+            wingShape.lineTo(3, 0.5);  // Back of wing
+            wingShape.lineTo(0, 0.2);  // Inner back
+            wingShape.closePath();
+
+            const wingExtrudeSettings = { depth: 0.2, bevelEnabled: false };
+            const wingGeometry = new THREE.ExtrudeGeometry(wingShape, wingExtrudeSettings);
+            const wingMaterial = new THREE.MeshLambertMaterial({ color: 0x0055aa, flatShading: true });
+
+            const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            leftWing.rotation.y = Math.PI; // Flip for left side
+            leftWing.position.set(-0.8, 0, -0.5); // Position relative to body
+            arwingGroup.add(leftWing);
+
+            const rightWing = new THREE.Mesh(wingGeometry, wingMaterial.clone()); // Use cloned material if colors differ
+            rightWing.position.set(0.8, 0, -0.5); // Position relative to body
+            arwingGroup.add(rightWing);
+
+            // Cockpit (small pyramid or box)
+            const cockpitGeometry = new THREE.BoxGeometry(0.6, 0.4, 0.8);
+            const cockpitMaterial = new THREE.MeshLambertMaterial({ color: 0x3333cc, flatShading: true });
+            const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+            cockpit.position.set(0, 0.6, -0.8);
+            arwingGroup.add(cockpit);
+
+            arwing = arwingGroup;
+            arwing.position.set(0, 2, 0); // Initial position of the Arwing in the world
+            scene.add(arwing);
+        }
+
+        function createGround() {
+            const groundGeometry = new THREE.PlaneGeometry(500, 1000, 20, 20); // Large plane
+            const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x336633, flatShading: true });
+            ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2; // Rotate to be flat
+            ground.position.y = -2; // Position below Arwing
+            scene.add(ground);
+        }
+
+        function createSky() {
+            // Using a simple large sphere for the sky
+            const skyGeometry = new THREE.SphereGeometry(400, 32, 16);
+            const skyMaterial = new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide });
+            sky = new THREE.Mesh(skyGeometry, skyMaterial);
+            scene.add(sky);
+        }
+
+        function createBuilding(x, z) {
+            const height = Math.random() * 20 + 10;
+            const width = Math.random() * 5 + 3;
+            const depth = Math.random() * 5 + 3;
+            const buildingGeometry = new THREE.BoxGeometry(width, height, depth);
+            const buildingMaterial = new THREE.MeshLambertMaterial({
+                color: new THREE.Color(Math.random() * 0.5 + 0.2, Math.random() * 0.5 + 0.2, Math.random() * 0.5 + 0.2), // Shades of grey/brown
+                flatShading: true
+            });
+            const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            building.position.set(x, height / 2 - 2, z); // Position on the ground
+            obstacles.push({mesh: building, type: 'building'});
+            scene.add(building);
+            return building;
+        }
+
+        function createArch(x, z) {
+            const archGroup = new THREE.Group();
+            const pillarHeight = 15;
+            const pillarWidth = 2;
+            const pillarDepth = 2;
+            const archWidth = 10; // Span of the arch
+
+            const pillarGeometry = new THREE.BoxGeometry(pillarWidth, pillarHeight, pillarDepth);
+            const pillarMaterial = new THREE.MeshLambertMaterial({ color: 0x777777, flatShading: true });
+
+            const pillarLeft = new THREE.Mesh(pillarGeometry, pillarMaterial);
+            pillarLeft.position.set(-archWidth / 2, pillarHeight / 2 - 2, 0);
+            archGroup.add(pillarLeft);
+
+            const pillarRight = new THREE.Mesh(pillarGeometry, pillarMaterial);
+            pillarRight.position.set(archWidth / 2, pillarHeight / 2 - 2, 0);
+            archGroup.add(pillarRight);
+
+            const topGeometry = new THREE.BoxGeometry(archWidth + pillarWidth, pillarWidth, pillarDepth);
+            const topMesh = new THREE.Mesh(topGeometry, pillarMaterial);
+            topMesh.position.set(0, pillarHeight - pillarWidth / 2 -2 , 0);
+            archGroup.add(topMesh);
+
+            archGroup.position.set(x, 0, z);
+            obstacles.push({mesh: archGroup, type: 'arch'});
+            scene.add(archGroup);
+            return archGroup;
+        }
+
+        function spawnLaser() {
+            const laserGeometry = new THREE.CylinderGeometry(0.1, 0.1, 2, 8);
+            const laserMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Bright red
+
+            // Create two lasers
+            for (let i = 0; i < 2; i++) {
+                const laser = new THREE.Mesh(laserGeometry, laserMaterial);
+                // Position lasers at wingtips (approximate)
+                const wingTipOffset = (i === 0) ? -1.5 : 1.5; // Left and right
+                laser.position.copy(arwing.position);
+                laser.position.x += wingTipOffset * Math.cos(arwing.rotation.y) - 0.5 * Math.sin(arwing.rotation.y); // Adjust for arwing rotation
+                laser.position.z += wingTipOffset * Math.sin(arwing.rotation.y) + 0.5 * Math.cos(arwing.rotation.y);
+                laser.position.y += 0.2; // Slightly above wings
+
+                laser.quaternion.copy(arwing.quaternion); // Align with Arwing's orientation
+                laser.rotateX(Math.PI / 2); // Point forward
+
+                lasers.push(laser);
+                scene.add(laser);
+            }
+        }
+
+        function createExplosion(position) {
+            if (explosion) scene.remove(explosion.mesh); // Remove previous one if any
+
+            const explosionGeometry = new THREE.SphereGeometry(1, 16, 8); // Start small
+            const explosionMaterial = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.8 });
+            const mesh = new THREE.Mesh(explosionGeometry, explosionMaterial);
+            mesh.position.copy(position);
+            scene.add(mesh);
+
+            explosion = {
+                mesh: mesh,
+                startTime: clock.getElapsedTime(),
+                duration: 0.7, // Explosion lasts 0.7 seconds
+                maxSize: 8
+            };
+        }
+
+        // --- ANIMATION & UPDATES ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = clock.getDelta();
+            animationTime += deltaTime;
+
+            // --- Loop Reset ---
+            if (animationTime >= animationDuration) {
+                animationTime = 0; // Reset timer
+                resetSceneState(); // Reset positions and clear dynamic objects
+                // Potentially reset arwing to a starting orientation/position if needed
+                arwing.position.set(0, 2, 0);
+                arwing.rotation.set(0,0,0);
+                barrelRollActive = false;
+                barrelRollProgress = 0;
+            }
+
+            // --- Arwing Movement & Actions ---
+            // Weaving
+            arwing.position.x = Math.sin(animationTime * 1.5) * 2; // Gentle side-to-side weave
+
+            // Barrel Roll Logic
+            if (barrelRollActive) {
+                barrelRollProgress += deltaTime;
+                const rollAmount = (barrelRollProgress / barrelRollDuration) * Math.PI * 2;
+                arwing.rotation.z = rollAmount;
+                if (barrelRollProgress >= barrelRollDuration) {
+                    barrelRollActive = false;
+                    barrelRollProgress = 0;
+                    arwing.rotation.z = 0; // Ensure it ends straight
+                }
+            }
+
+            // --- Timeline-based events ---
+            // These times are approximate within the 60s loop
+            // Lasers
+            if (Math.floor(animationTime) % 10 === 5 && lasers.length === 0) { // Fire lasers around 5s, 15s, 25s, etc.
+                 if (lasers.length < 4) spawnLaser(); // Limit concurrent lasers
+            }
+            // Barrel Rolls
+            if (Math.floor(animationTime) === 12 || Math.floor(animationTime) === 40) {
+                if (!barrelRollActive && barrelRollProgress === 0) {
+                     barrelRollActive = true;
+                }
+            }
+            // Explosion
+            if (Math.floor(animationTime) === 35 && !explosion) {
+                const explosionPosition = arwing.position.clone();
+                explosionPosition.z -= 20; // Explode in front of the arwing
+                explosionPosition.y = Math.random() * 3 + 1; // Random height
+                createExplosion(explosionPosition);
+            }
+
+
+            // --- Update Lasers ---
+            for (let i = lasers.length - 1; i >= 0; i--) {
+                const laser = lasers[i];
+                laser.translateZ(-100 * deltaTime); // Move laser forward (relative to its orientation)
+                if (laser.position.z < arwing.position.z - 200 || Math.abs(laser.position.x) > 100) { // Remove if far
+                    scene.remove(laser);
+                    lasers.splice(i, 1);
+                }
+            }
+
+            // --- Update Explosion ---
+            if (explosion) {
+                const timeSinceExplosionStart = clock.getElapsedTime() - explosion.startTime;
+                if (timeSinceExplosionStart < explosion.duration) {
+                    const scale = (timeSinceExplosionStart / explosion.duration) * explosion.maxSize;
+                    explosion.mesh.scale.set(scale, scale, scale);
+                    explosion.mesh.material.opacity = 0.8 * (1 - timeSinceExplosionStart / explosion.duration);
+                } else {
+                    scene.remove(explosion.mesh);
+                    explosion = null;
+                }
+            }
+
+            // --- Update Obstacles (Buildings & Arches) ---
+            // Move obstacles towards the player
+            obstacles.forEach(obs => {
+                obs.mesh.position.z += arwingSpeed * deltaTime * 1.5; // Make them move faster than arwing for parallax
+            });
+
+            // Remove obstacles that have passed and spawn new ones
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                if (obstacles[i].mesh.position.z > camera.position.z + 20) { // If behind camera
+                    scene.remove(obstacles[i].mesh);
+                    obstacles.splice(i, 1);
+                }
+            }
+
+            // Spawn new obstacles to maintain density
+            // This is a simple spawning logic, can be improved for more varied environments
+            if (obstacles.length < 30) { // Maintain around 30 obstacles
+                const randomX = (Math.random() - 0.5) * 100; // Spread them out
+                const randomZ = arwing.position.z - (Math.random() * 150 + 100); // Spawn ahead of arwing
+
+                if (animationTime > 5 && animationTime < 25) { // More buildings in this phase
+                     if (Math.random() < 0.8) createBuilding(randomX, randomZ);
+                } else if (animationTime > 28 && animationTime < 38 && Math.random() < 0.2 && !obstacles.find(o => o.type === 'arch' && o.mesh.position.z < arwing.position.z - 50)) {
+                    // Try to spawn an arch if one isn't nearby and in the right time slot
+                    const archX = (Math.random() - 0.5) * 10; // More centered
+                    createArch(archX, randomZ - 20); // Spawn arch a bit further
+                } else {
+                    if (Math.random() < 0.5) createBuilding(randomX, randomZ);
+                }
+            }
+
+
+            // --- Camera Update (Chase Cam) ---
+            // The Arwing itself doesn't move forward in world Z; the world moves towards it.
+            // The camera stays relatively fixed in Z, looking at the Arwing.
+            // The Arwing's X and Y position changes due to weaving/actions.
+            camera.position.x = arwing.position.x; // Follow Arwing's horizontal weave
+            camera.position.y = arwing.position.y + 3; // Slightly above Arwing
+            camera.position.z = arwing.position.z + 12; // Behind Arwing
+
+            // Smoothly look at the Arwing
+            const lookAtPosition = arwing.position.clone();
+            lookAtPosition.y += 1; // Look slightly above arwing center
+            camera.lookAt(lookAtPosition);
+
+            // Adjust camera during barrel roll for a more dynamic feel (optional)
+            if (barrelRollActive) {
+                camera.rotation.z = arwing.rotation.z * 0.8; // Camera rolls slightly with arwing
+            } else {
+                // Ensure camera is upright after roll, can be tricky with lookAt
+                // A more robust solution might involve quaternion slerping or temporarily detaching lookAt
+                camera.up.set(0,1,0); // Reset up vector
+            }
+
+
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+
+        function resetSceneState() {
+            // Clear existing dynamic objects
+            lasers.forEach(laser => scene.remove(laser));
+            lasers.length = 0;
+
+            if (explosion) {
+                scene.remove(explosion.mesh);
+                explosion = null;
+            }
+
+            obstacles.forEach(obs => scene.remove(obs.mesh));
+            obstacles.length = 0;
+
+            // Re-populate initial obstacles
+            for (let i = 0; i < 15; i++) { // Initial batch of buildings
+                const randomX = (Math.random() - 0.5) * 100;
+                const randomZ = arwing.position.z - (Math.random() * 150 + 50); // Spawn ahead
+                createBuilding(randomX, randomZ);
+            }
+             // Add an initial arch if desired for the start of the loop
+            if(Math.random() < 0.3) {
+                createArch((Math.random() - 0.5) * 10, arwing.position.z - 80);
+            }
+        }
+
+
+        // --- RESIZE HANDLER ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- START ---
+        init();
+
+    </script>
+</body>
+</html>
